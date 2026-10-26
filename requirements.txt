@@ -1,0 +1,4 @@
+# pandas 3.1.0's compiled modules are blocked by Windows Application Control on the dev machine; 3.0.3 loads.
+pandas==3.0.3
+yfinance==1.7.0
+pytest==9.1.1

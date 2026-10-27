@@ -1,7 +1,7 @@
-"""Read the 5-minute day store and set it to the frequency a run asks for."""
+"""Read the daily year store and set it to the frequency a run asks for."""
 
 import warnings
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -9,7 +9,7 @@ from pandas.tseries.frequencies import to_offset
 
 BARS_DIR = Path(__file__).resolve().parent.parent / "data" / "bars"
 COLUMNS = ["open", "high", "low", "close", "volume"]
-BASE_FREQ = "5min"
+BASE_FREQ = "1D"
 
 
 def as_date(value):
@@ -26,13 +26,14 @@ def weekdays(start, end):
     return out
 
 
-def day_path(root, symbol, day):
-    return Path(root) / symbol / f"{day.isoformat()}.csv"
+def year_path(root, symbol, year):
+    return Path(root) / symbol / f"{int(year)}.csv"
 
 
-def read_day(path):
+def read_bars(path):
     frame = pd.read_csv(path, index_col="timestamp", float_precision="round_trip")
     frame.index = pd.to_datetime(frame.index, utc=True)
+    frame.index.name = "timestamp"
     return frame[COLUMNS]
 
 
@@ -44,23 +45,18 @@ def load_prices(symbols, start, end, freq, root=BARS_DIR):
 
 
 def _load_symbol(symbol, start, end, freq, root):
-    days = []
-    folder = Path(root) / symbol
-    if folder.is_dir():
-        for path in sorted(folder.glob("*.csv")):
-            try:
-                day = date.fromisoformat(path.stem)
-            except ValueError:
-                continue
-            if start <= day <= end:
-                days.append(read_day(path))
+    frames = []
+    for year in range(start.year, end.year + 1):
+        path = year_path(root, symbol, year)
+        if path.is_file():
+            frames.append(read_bars(path))
 
-    if days:
-        bars = pd.concat(days).sort_index()
+    if frames:
+        bars = pd.concat(frames).sort_index()
     else:
         bars = pd.DataFrame(columns=COLUMNS, index=pd.DatetimeIndex([], tz="UTC", name="timestamp"))
-    bar_dates = bars.index.date
-    bars = bars[(bar_dates >= start) & (bar_dates <= end)]
+    dates = bars.index.normalize()
+    bars = bars[(dates >= pd.Timestamp(start, tz="UTC")) & (dates <= pd.Timestamp(end, tz="UTC"))]
 
     covered = set(bars.index.date)
     missing = [day for day in weekdays(start, end) if day not in covered]
@@ -76,4 +72,5 @@ def _load_symbol(symbol, start, end, freq, root):
     resampled = bars.resample(freq, label="left", closed="left").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
     )
+    resampled.index.name = "timestamp"
     return resampled.dropna(subset=["open"])

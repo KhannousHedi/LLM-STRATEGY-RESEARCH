@@ -1,6 +1,6 @@
 # LLM strategy backtest
 
-One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. The data store, feature sets, prompts, the model call, the simulation, and the CLI are implemented. A real backtest waits for its own request.
+One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. The data store, feature sets, prompts, the model call, the simulation, and the CLI are implemented. Daily bars are stored as one year file per symbol. No finished backtest is stored under `runs/`.
 
 ## Setup
 
@@ -11,17 +11,17 @@ python -m venv .venv
 
 ## Data store
 
-5-minute bars are stored as one UTC day per file at `data/bars/{SYMBOL}/{YYYY-MM-DD}.csv` (local only, not tracked).
+Daily bars are stored as one UTC year per file at `data/bars/{SYMBOL}/{YYYY}.csv` (local only, not tracked). One row is one session.
 
 ```python
 from src.download import download_bars
 from src.data import load_prices
 
-download_bars(["SPY"], "2026-09-01", "2026-10-23")
-prices = load_prices(["SPY"], "2026-09-01", "2026-10-23", "1D")
+download_bars(["SPY"], "2024-01-01", "2024-12-31")
+prices = load_prices(["SPY"], "2024-01-01", "2024-12-31", "1D")
 ```
 
-`download_bars` only asks Yahoo for weekdays that have no file yet, in chunks of at most 60 days. Yahoo serves 5-minute bars for roughly the last 60 days, so older days stay missing. `load_prices` reads the store, warns about missing weekdays, and resamples to the requested frequency.
+`download_bars` asks Yahoo for `1d` bars, unadjusted, regular session. A missing year is always fetched from January 1 through December 31, even when the requested range is shorter. A finished year that already has a file is left as it is. The current UTC year is replaced through the last finished session. Today and later dates are not requested. `load_prices` reads the store and does not call Yahoo. It warns about missing weekdays and returns the rows inside the requested range. `1D` is those daily rows. Weekly and monthly resample them: open is the first, high is the max, low is the min, close is the last, and volume is the sum.
 
 ## Features
 
@@ -89,7 +89,7 @@ A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex chara
 ## CLI
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.cli download SPY --start 2026-09-01 --end 2026-10-23
+.\.venv\Scripts\python.exe -m src.cli download SPY --start 2024-01-01 --end 2024-12-31
 .\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2026-09-01 --end 2026-10-23
 ```
 
@@ -108,6 +108,6 @@ src/            source
 src/features/   one feature computation per set; prompts name a set
 tests/          tests
 prompts/        prompt templates (tracked)
-data/bars/      5-minute day files (local only)
+data/bars/      daily year files (local only)
 runs/{id}/      one folder per finished backtest (local only)
 ```

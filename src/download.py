@@ -1,28 +1,26 @@
-"""Fetch 5-minute bars from Yahoo and write one UTC day file per date."""
+"""Fetch daily bars from Yahoo and write one UTC year file per year."""
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import yfinance as yf
 
-from src.data import BARS_DIR, COLUMNS, as_date, day_path, weekdays
-
-CHUNK_DAYS = 60
+from src.data import BARS_DIR, COLUMNS, as_date, year_path
 
 log = logging.getLogger(__name__)
 
 
 def fetch_yahoo(symbol, first, last):
+    yf.config.debug.hide_exceptions = False
     return yf.Ticker(symbol).history(
         start=first.isoformat(),
         end=(last + timedelta(days=1)).isoformat(),
-        interval="5m",
+        interval="1d",
         prepost=False,
         auto_adjust=False,
         actions=False,
-        raise_errors=True,
     )
 
 
@@ -33,41 +31,42 @@ def download_bars(symbols, start, end, root=BARS_DIR):
 
 
 def _download_symbol(symbol, start, end, root):
-    # Today's session may still be open; a partial day file would never be refetched.
     today = datetime.now(timezone.utc).date()
-    missing = [
-        day for day in weekdays(start, end)
-        if day < today and not day_path(root, symbol, day).exists()
-    ]
     written = []
-    for chunk in _chunks(missing):
+    for year in range(start.year, end.year + 1):
+        bounds = _year_bounds(year, today)
+        if bounds is None:
+            continue
+        path = year_path(root, symbol, year)
+        if year < today.year and path.is_file():
+            continue
+        first, last = bounds
         try:
-            raw = fetch_yahoo(symbol, chunk[0], chunk[-1])
+            raw = fetch_yahoo(symbol, first, last)
         except Exception as error:
-            log.warning("%s: Yahoo rejected %s to %s: %s", symbol, chunk[0], chunk[-1], error)
+            log.warning("%s: Yahoo rejected %s: %s", symbol, year, error)
             continue
         if raw is None or raw.empty:
             continue
-        bars = _to_utc(symbol, raw)
-        wanted = set(chunk)
-        for day, day_bars in bars.groupby(bars.index.date):
-            if day not in wanted:
-                continue
-            _check_day(symbol, day, day_bars)
-            _write_day(day_path(root, symbol, day), day_bars)
-            written.append(day)
+        bars = _in_year(_to_utc(symbol, raw), first, last)
+        if bars.empty:
+            continue
+        _check_year(symbol, year, bars)
+        _write_year(path, bars)
+        written.append(year)
     return written
 
 
-def _chunks(days):
-    chunk = []
-    for day in days:
-        if chunk and (day - chunk[0]).days >= CHUNK_DAYS:
-            yield chunk
-            chunk = []
-        chunk.append(day)
-    if chunk:
-        yield chunk
+def _year_bounds(year, today):
+    if year > today.year:
+        return None
+    first = date(year, 1, 1)
+    if year < today.year:
+        return first, date(year, 12, 31)
+    last = today - timedelta(days=1)
+    if last < first:
+        return None
+    return first, last
 
 
 def _to_utc(symbol, raw):
@@ -76,20 +75,27 @@ def _to_utc(symbol, raw):
     bars = raw.rename(columns=str.lower)[COLUMNS]
     bars.index = bars.index.tz_convert("UTC")
     bars.index.name = "timestamp"
-    return bars
+    return bars.sort_index()
 
 
-def _check_day(symbol, day, bars):
+def _in_year(bars, first, last):
+    dates = bars.index.normalize()
+    return bars[(dates >= pd.Timestamp(first, tz="UTC")) & (dates <= pd.Timestamp(last, tz="UTC"))]
+
+
+def _check_year(symbol, year, bars):
     def fail(reason):
-        raise ValueError(f"{symbol} {day.isoformat()}: {reason}")
+        raise ValueError(f"{symbol} {year}: {reason}")
 
     index = bars.index
-    if (index.second != 0).any() or (index.microsecond != 0).any() or (index.nanosecond != 0).any():
-        fail("timestamp has seconds")
-    if (index.minute % 5 != 0).any():
-        fail("timestamp is not on a 5-minute boundary")
+    if index.tz is None or str(index.tz) != "UTC":
+        fail("timestamp is not timezone-aware UTC")
+    if (index.year != year).any():
+        fail("a timestamp falls outside the year")
     if not index.is_unique or not index.is_monotonic_increasing:
         fail("timestamps are not unique and increasing")
+    if len(set(index.date)) != len(index):
+        fail("more than one row for a session")
 
     open_, high, low, close, volume = (bars[name] for name in COLUMNS)
     if bars[["open", "high", "low", "close"]].isna().any().any():
@@ -100,7 +106,7 @@ def _check_day(symbol, day, bars):
         fail("volume is missing or negative")
 
 
-def _write_day(path, bars):
+def _write_year(path, bars):
     path.parent.mkdir(parents=True, exist_ok=True)
     out = bars.copy()
     out.index = pd.Index([ts.isoformat() for ts in out.index], name="timestamp")

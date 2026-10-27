@@ -6,8 +6,8 @@
 defaults to ``default``. ``--model`` defaults to ``qwen3:4b-instruct``.
 
 There is no symbol-count check. A missing prompt file fails when
-``load_template`` opens it. Coverage warnings and the download skip stay
-in the loader and the download.
+``load_template`` opens it. Coverage warnings stay in the loader. A
+finished year file is left as it is.
 """
 
 import argparse

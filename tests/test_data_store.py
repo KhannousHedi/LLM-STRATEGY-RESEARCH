@@ -1,6 +1,5 @@
 from datetime import date, timedelta
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -8,48 +7,39 @@ from src.data import load_prices
 from src.download import download_bars
 
 SYMBOL = "TEST"
-BARS_PER_DAY = 78
 
 
-def yahoo_bars(days):
-    """Frame shaped like yfinance 5-minute history: New York timestamps, capitalized columns."""
-    frames = []
-    for day in days:
-        index = pd.date_range(f"{day} 09:30", periods=BARS_PER_DAY, freq="5min", tz="America/New_York")
-        base = 100 + day.toordinal() % 7 + np.arange(BARS_PER_DAY) * 0.01
-        frames.append(pd.DataFrame(
-            {
-                "Open": base,
-                "High": base + 0.05,
-                "Low": base - 0.05,
-                "Close": base + 0.01,
-                "Adj Close": base + 0.01,
-                "Volume": np.arange(BARS_PER_DAY) * 10 + 1000,
-            },
-            index=index.rename("Datetime"),
-        ))
-    if not frames:
-        return pd.DataFrame()
-    return pd.concat(frames)
+def store_year(root, symbol, rows):
+    """Write known daily sessions into ``{year}.csv``. Each row is date, O, H, L, C, V."""
+    by_year = {}
+    for row in rows:
+        by_year.setdefault(row[0].year, []).append(row)
+    for year, items in by_year.items():
+        index = pd.DatetimeIndex([pd.Timestamp(item[0], tz="UTC") for item in items], name="timestamp")
+        frame = pd.DataFrame(
+            [item[1:] for item in items],
+            index=index,
+            columns=["open", "high", "low", "close", "volume"],
+        )
+        path = root / symbol / f"{year}.csv"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        out = frame.copy()
+        out.index = pd.Index([ts.isoformat() for ts in out.index], name="timestamp")
+        out.to_csv(path)
 
 
-def as_store(raw):
-    bars = raw.rename(columns=str.lower)[["open", "high", "low", "close", "volume"]]
-    bars.index = bars.index.tz_convert("UTC").rename("timestamp")
-    return bars
+def session_dates(path):
+    dates = []
+    lines = path.read_text().splitlines()
+    assert lines[0] == "timestamp,open,high,low,close,volume"
+    for line in lines[1:]:
+        stamp = line.split(",", 1)[0]
+        assert stamp.endswith("+00:00")
+        dates.append(date.fromisoformat(stamp[:10]))
+    return dates
 
 
-def store_day(root, day):
-    bars = as_store(yahoo_bars([day]))
-    path = root / SYMBOL / f"{day.isoformat()}.csv"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    out = bars.copy()
-    out.index = pd.Index([ts.isoformat() for ts in out.index], name="timestamp")
-    out.to_csv(path)
-    return bars
-
-
-def test_download_and_load_return_the_bars(tmp_path):
+def test_download_and_load_return_the_bars(tmp_path, monkeypatch):
     symbol = "SPY"
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=6)
@@ -57,36 +47,58 @@ def test_download_and_load_return_the_bars(tmp_path):
 
     files = sorted((tmp_path / symbol).glob("*.csv"))
     assert files
-    saved_rows = 0
+    assert [path.stem for path in files] == [str(year) for year in range(start.year, end.year + 1)]
+    saved = []
     for path in files:
-        day = date.fromisoformat(path.stem)
-        assert start <= day <= end and day.weekday() < 5
-        lines = path.read_text().splitlines()
-        assert lines[0] == "timestamp,open,high,low,close,volume"
-        for line in lines[1:]:
-            stamp = line.split(",", 1)[0]
-            assert stamp[:10] == day.isoformat()
-            assert stamp.endswith("+00:00")
-        saved_rows += len(lines) - 1
+        year = int(path.stem)
+        dates = session_dates(path)
+        assert dates
+        assert len(dates) == len(set(dates))
+        assert all(day.year == year and day < date.today() for day in dates)
+        saved.extend(dates)
+    assert any(day < start or day > end for day in saved)
 
-    loaded = load_prices([symbol], start, end, "5min", root=tmp_path)[symbol]
-    assert len(loaded) == saved_rows
+    def fail(*args, **kwargs):
+        raise AssertionError("Yahoo was called")
+
+    monkeypatch.setattr("src.download.fetch_yahoo", fail)
+    monkeypatch.setattr("yfinance.Ticker.history", fail)
+    loaded = load_prices([symbol], start, end, "1D", root=tmp_path)[symbol]
+    assert list(loaded.index.date) == [day for day in saved if start <= day <= end]
 
 
-def test_download_chunks_the_range(tmp_path):
-    end = date.today() - timedelta(days=1)
-    start = end - timedelta(days=90)
-    assert (end - start).days > 60
+def test_download_chunks_the_range(tmp_path, monkeypatch):
+    start, end = date(2024, 12, 1), date(2025, 1, 31)
     download_bars(["SPY"], start, end, root=tmp_path)
+
+    dates_2024 = session_dates(tmp_path / "SPY" / "2024.csv")
+    assert dates_2024[0] == date(2024, 1, 2)
+    assert dates_2024[-1] == date(2024, 12, 31)
+    assert (tmp_path / "SPY" / "2025.csv").is_file()
+
+    called = []
+
+    def fail(*args, **kwargs):
+        called.append(args)
+        raise AssertionError("Yahoo was called")
+
+    monkeypatch.setattr("src.download.fetch_yahoo", fail)
+    monkeypatch.setattr("yfinance.Ticker.history", fail)
+    download_bars(["SPY"], date(2024, 6, 1), date(2024, 6, 30), root=tmp_path)
+    load_prices(["SPY"], start, end, "1D", root=tmp_path)
+    assert called == []
 
 
 def test_load_prices_warns_on_partial_range(tmp_path):
     start, end = date(2024, 3, 4), date(2024, 3, 6)
-    for day in [date(2024, 3, 4), date(2024, 3, 6), date(2024, 3, 7)]:
-        store_day(tmp_path, day)
+    store_year(tmp_path, SYMBOL, [
+        (date(2024, 3, 4), 10, 12, 9, 11, 100),
+        (date(2024, 3, 6), 11, 13, 10, 12, 110),
+        (date(2024, 3, 7), 12, 14, 11, 13, 120),
+    ])
 
     with pytest.warns(UserWarning) as record:
-        loaded = load_prices([SYMBOL], start, end, "5min", root=tmp_path)[SYMBOL]
+        loaded = load_prices([SYMBOL], start, end, "1D", root=tmp_path)[SYMBOL]
 
     messages = [str(w.message) for w in record]
     assert any(SYMBOL in m and "2024-03-05" in m for m in messages)
@@ -95,15 +107,17 @@ def test_load_prices_warns_on_partial_range(tmp_path):
 
 def test_load_prices_resamples_to_frequency(tmp_path):
     days = [date(2024, 3, 4), date(2024, 3, 5)]
-    stored = [store_day(tmp_path, day) for day in days]
+    store_year(tmp_path, SYMBOL, [
+        (days[0], 10, 12, 9, 11, 100),
+        (days[1], 11, 14, 8, 13, 250),
+    ])
 
-    daily = load_prices([SYMBOL], days[0], days[-1], "1D", root=tmp_path)[SYMBOL]
+    weekly = load_prices([SYMBOL], days[0], days[-1], "W", root=tmp_path)[SYMBOL]
 
-    assert list(daily.index) == [pd.Timestamp(day, tz="UTC") for day in days]
-    for (_, row), bars in zip(daily.iterrows(), stored):
-        assert row["open"] == bars["open"].iloc[0]
-        assert row["high"] == bars["high"].max()
-        assert row["low"] == bars["low"].min()
-        assert row["close"] == bars["close"].iloc[-1]
-        assert row["volume"] == bars["volume"].sum()
-
+    assert list(weekly.index) == [pd.Timestamp("2024-03-03", tz="UTC")]
+    row = weekly.iloc[0]
+    assert row["open"] == 10
+    assert row["high"] == 14
+    assert row["low"] == 8
+    assert row["close"] == 13
+    assert row["volume"] == 350

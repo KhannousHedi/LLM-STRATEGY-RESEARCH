@@ -1,6 +1,6 @@
 # LLM strategy backtest
 
-One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. Work in progress: the data store, feature sets, prompts, the model call, and the simulation are implemented. The CLI is not yet.
+One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. The data store, feature sets, prompts, the model call, the simulation, and the CLI are implemented. A real backtest waits for its own request.
 
 ## Setup
 
@@ -74,14 +74,26 @@ entries, exits = signals([record], sessions)
 
 ## Simulation
 
-`simulate` passes those booleans to vectorbt unchanged. The fill price is that session's open. Cash is 100,000, slippage is 0.0005, and fees are 0. `benchmark` is the same call with one entry on the first execution session and no exits.
+`simulate` passes those booleans to vectorbt unchanged. The fill price is that session's open. Cash is 100,000, slippage is 0.0005, and fees are 0.
 
 ```python
-from src.simulate import benchmark, simulate
+from src.simulate import simulate
 
 pf = simulate(close, opens, entries, exits, "1D")
-bench = benchmark(close, opens, record["execute_on"], "1D")
 ```
+
+## Runs
+
+A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex characters. The folder holds `config.json`, `prompt.txt`, `decisions.jsonl`, `orders.csv`, `equity.csv`, `summary.txt`, and `equity.png`. `config.json` records the prompt name. `prompt.txt` is a copy of that prompt file. Filled session text goes to `decisions.jsonl`. `summary.txt` is the vectorbt stats for the portfolio, including the Sharpe ratio, win rate, and max drawdown. A run that raises or exits is removed. Tests write outside `runs/`.
+
+## CLI
+
+```powershell
+.\.venv\Scripts\python.exe -m src.cli download SPY --start 2026-09-01 --end 2026-10-23
+.\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2026-09-01 --end 2026-10-23
+```
+
+`download` takes one or more symbols. `backtest` takes one `--symbol`, `--start`, `--end`, `--model` (default `qwen3:4b-instruct`), `--freq` (default `1D`), and `--prompt` (default `default`). It prints the run folder when the backtest finishes. It does not download bars.
 
 ## Tests
 

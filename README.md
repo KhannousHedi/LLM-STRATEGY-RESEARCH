@@ -1,6 +1,6 @@
 # LLM strategy backtest
 
-One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. Work in progress: the data store, feature sets, prompts, and the model call are implemented. Simulation and the CLI are not yet.
+One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. Work in progress: the data store, feature sets, prompts, the model call, and the simulation are implemented. The CLI is not yet.
 
 ## Setup
 
@@ -59,6 +59,28 @@ text = render(template, row, "out")
 from src.llm import decide
 
 action = decide(text)
+```
+
+## Decisions
+
+`place` names the next session in the bar index. `BUY` writes the entry boolean on that session, `SELL` writes the exit boolean, and `HOLD` writes neither. The position is not read. A `SELL` while flat still writes the exit boolean. `signals` stamps the booleans on the session index.
+
+```python
+from src.decisions import place, signals
+
+record = place("BUY", sessions[0], sessions)
+entries, exits = signals([record], sessions)
+```
+
+## Simulation
+
+`simulate` passes those booleans to vectorbt unchanged. The fill price is that session's open. Cash is 100,000, slippage is 0.0005, and fees are 0. `benchmark` is the same call with one entry on the first execution session and no exits.
+
+```python
+from src.simulate import benchmark, simulate
+
+pf = simulate(close, opens, entries, exits, "1D")
+bench = benchmark(close, opens, record["execute_on"], "1D")
 ```
 
 ## Tests

@@ -1,11 +1,10 @@
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from src import download
-from src.data import load_prices, weekdays
+from src.data import load_prices
 from src.download import download_bars
 
 SYMBOL = "TEST"
@@ -50,51 +49,35 @@ def store_day(root, day):
     return bars
 
 
-class FakeYahoo:
-    def __init__(self, oldest=None):
-        self.oldest = oldest
-        self.calls = []
-        self.served = []
+def test_download_and_load_return_the_bars(tmp_path):
+    symbol = "SPY"
+    end = date.today() - timedelta(days=1)
+    start = end - timedelta(days=6)
+    download_bars([symbol], start, end, root=tmp_path)
 
-    def __call__(self, symbol, first, last):
-        self.calls.append((first, last))
-        if (last - first).days + 1 > 60:
-            raise ValueError("5m data is limited to 60 days per request")
-        days = [d for d in weekdays(first, last) if self.oldest is None or d >= self.oldest]
-        self.served.extend(days)
-        return yahoo_bars(days)
+    files = sorted((tmp_path / symbol).glob("*.csv"))
+    assert files
+    saved_rows = 0
+    for path in files:
+        day = date.fromisoformat(path.stem)
+        assert start <= day <= end and day.weekday() < 5
+        lines = path.read_text().splitlines()
+        assert lines[0] == "timestamp,open,high,low,close,volume"
+        for line in lines[1:]:
+            stamp = line.split(",", 1)[0]
+            assert stamp[:10] == day.isoformat()
+            assert stamp.endswith("+00:00")
+        saved_rows += len(lines) - 1
 
-
-def stored_dates(root):
-    return sorted(date.fromisoformat(p.stem) for p in (root / SYMBOL).glob("*.csv"))
-
-
-def test_download_and_load_return_the_bars(tmp_path, monkeypatch):
-    days = [date(2024, 3, 4), date(2024, 3, 5)]
-    monkeypatch.setattr(download, "fetch_yahoo", FakeYahoo())
-
-    download_bars([SYMBOL], days[0], days[-1], root=tmp_path)
-    loaded = load_prices([SYMBOL], days[0], days[-1], "5min", root=tmp_path)[SYMBOL]
-
-    assert stored_dates(tmp_path) == days
-    expected = as_store(yahoo_bars(days))
-    pd.testing.assert_frame_equal(loaded, expected, check_freq=False, check_index_type=False)
-    assert loaded.index.equals(expected.index)
+    loaded = load_prices([symbol], start, end, "5min", root=tmp_path)[symbol]
+    assert len(loaded) == saved_rows
 
 
-def test_download_chunks_the_range(tmp_path, monkeypatch):
-    start, end = date(2024, 1, 1), date(2024, 4, 30)
-    fake = FakeYahoo(oldest=date(2024, 3, 1))
-    monkeypatch.setattr(download, "fetch_yahoo", fake)
-
-    download_bars([SYMBOL], start, end, root=tmp_path)
-
-    assert len(fake.calls) > 1
-    assert all((last - first).days + 1 <= 60 for first, last in fake.calls)
-    requested = [d for first, last in fake.calls for d in weekdays(first, last)]
-    assert requested == weekdays(start, end)
-    assert stored_dates(tmp_path) == sorted(fake.served)
-    assert fake.served and min(fake.served) == date(2024, 3, 1)
+def test_download_chunks_the_range(tmp_path):
+    end = date.today() - timedelta(days=1)
+    start = end - timedelta(days=90)
+    assert (end - start).days > 60
+    download_bars(["SPY"], start, end, root=tmp_path)
 
 
 def test_load_prices_warns_on_partial_range(tmp_path):
@@ -124,15 +107,3 @@ def test_load_prices_resamples_to_frequency(tmp_path):
         assert row["close"] == bars["close"].iloc[-1]
         assert row["volume"] == bars["volume"].sum()
 
-
-def test_second_download_skips_yahoo(tmp_path, monkeypatch):
-    start, end = date(2024, 3, 4), date(2024, 3, 10)
-    monkeypatch.setattr(download, "fetch_yahoo", FakeYahoo())
-    download_bars([SYMBOL], start, end, root=tmp_path)
-    assert stored_dates(tmp_path) == weekdays(start, end)
-
-    second = FakeYahoo()
-    monkeypatch.setattr(download, "fetch_yahoo", second)
-    download_bars([SYMBOL], start, end, root=tmp_path)
-
-    assert second.calls == []

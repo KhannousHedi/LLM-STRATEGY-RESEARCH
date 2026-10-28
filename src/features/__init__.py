@@ -5,22 +5,27 @@
 ``compute`` once per symbol. Extra keyword arguments are passed on to
 ``compute``. This package does not define prompts.
 
-A feature module defines one subclass. ``compute`` takes ``bars`` and any
-arguments that subclass adds::
+A feature module defines one subclass. It declares the columns it
+returns, a one-line definition of each, and ``compute``::
 
     from src.features import FeatureSet
 
     class Example(FeatureSet):
         columns = ("r1",)
+        descriptions = {"r1": "one-bar close-to-close return"}
 
         def compute(self, bars, window):
             # bars is one symbol.
-            # Return a dataframe indexed by that symbol's datetimes.
+            # Return a dataframe indexed by that symbol's datetimes,
+            # with exactly ``columns``, in that order.
             ...
 
-A subclass inherits ``columns`` and ``compute`` until it replaces them.
-This file checks ``columns``, then checks that each returned frame is a
-dataframe with those columns and that symbol's datetimes.
+``columns`` is what `python -m src.cli features {feature_set}` prints,
+with its definitions, and what a prompt may name in a ``{key}`` slot.
+This file checks ``columns`` and ``descriptions``, then checks that each
+returned frame is a dataframe with those columns and that symbol's
+datetimes. No column may be named ``position``: that slot is the
+strategy's position.
 """
 
 import importlib
@@ -29,9 +34,11 @@ import pandas as pd
 
 
 class FeatureSet:
-    """Base for one feature computation. Subclasses set ``columns`` and ``compute``."""
+    """Base for one feature computation. Subclasses set ``columns``,
+    ``descriptions``, and ``compute``."""
 
     columns = ()
+    descriptions = {}
 
     def compute(self, bars):
         raise NotImplementedError
@@ -58,10 +65,17 @@ def load_feature_set(name):
     if feature_set.compute.__func__ is FeatureSet.compute:
         raise TypeError(f"{module_name} must implement compute")
     columns = feature_set.columns
-    if not isinstance(columns, tuple) or not columns or not all(isinstance(item, str) and item.isidentifier() for item in columns):
-        raise TypeError(f"{module_name} must set columns to a non-empty tuple of names")
+    if not isinstance(columns, tuple) or not all(isinstance(item, str) and item.isidentifier() for item in columns):
+        raise TypeError(f"{module_name} must set columns to a tuple of names")
     if len(set(columns)) != len(columns):
         raise TypeError(f"{module_name} repeats a column name")
+    if "position" in columns:
+        raise TypeError(f"{module_name} must not name a column position")
+    descriptions = feature_set.descriptions
+    if not isinstance(descriptions, dict) or set(descriptions) != set(columns):
+        raise TypeError(f"{module_name} descriptions must define each column")
+    if not all(isinstance(text, str) and text for text in descriptions.values()):
+        raise TypeError(f"{module_name} descriptions must be non-empty strings")
     return feature_set
 
 

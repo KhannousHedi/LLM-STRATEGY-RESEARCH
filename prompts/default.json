@@ -1,5 +1,0 @@
-{
-  "feature_set": "default",
-  "parameters": {"ma_window": 20, "vol_window": 20, "volume_window": 20},
-  "wording": "Decide the next action for one unnamed series. Its name and the date are unknown.\n\nReadings, in order: one-bar return {features#1}; five-bar return {features#2}; twenty-bar return {features#3}; distance of the last price from its moving average {features#4}; how widely recent one-bar returns move {features#5}; how the last volume compares with its recent average {features#6}.\n\nPosition: {position}\n\nin means the series is held. out means it is flat. BUY enters from flat. SELL exits from held. HOLD leaves the position as it is.\n\nReply with only this JSON object: {\"action\": \"BUY\"|\"SELL\"|\"HOLD\", \"reason\": \"...\"}\n"
-}

@@ -1,12 +1,12 @@
 """Create one run folder and keep it only when the backtest finishes.
 
 ``record`` makes an id, ``YYYYMMDD-HHMMSS-`` plus six hex characters, and
-writes ``config.json`` and ``prompt.txt`` under that folder. The template
-text is stored unchanged. ``record`` does not render a session, call the
-model, check coverage, or check timestamps.
+writes ``config.json`` under that folder. The config holds the strategy
+name and the parameters dict passed to it, unchanged. ``record`` does not
+load the strategy, check coverage, or check timestamps.
 
-``backtest`` loads the named prompt, calls ``record``, then calls the
-loader, the feature set, ``render``, ``decide``, ``place``, and
+``backtest`` loads the named strategy, calls ``record``, then calls the
+loader, the strategy's feature set, ``decide``, ``place``, and
 ``simulate``. It writes the remaining files in the same folder. A row
 that is not all finite is not sent. The last bar is not sent. If
 ``backtest`` raises or exits, the folder is removed, partial files
@@ -25,9 +25,8 @@ from pathlib import Path
 from src.data import load_prices
 from src.decisions import place, signals
 from src.features import build_features
-from src.llm import decide
-from src.prompt import PROMPTS_DIR, load_template, render
 from src.simulate import INIT_CASH, SLIPPAGE, simulate
+from src.strategies import load_strategy
 
 RUNS_DIR = Path(__file__).resolve().parent.parent / "runs"
 
@@ -40,21 +39,20 @@ def _write_text(path, text):
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def record(symbol, window, freq, model, prompt, template, slippage, cash, root=RUNS_DIR):
+def record(symbol, window, freq, strategy, parameters, slippage, cash, root=RUNS_DIR):
     folder = Path(root) / _run_id()
     folder.mkdir(parents=True)
     config = {
         "symbol": symbol,
         "window": window,
         "freq": freq,
-        "model": model,
-        "prompt": prompt,
+        "strategy": strategy,
+        "parameters": parameters,
         "slippage": slippage,
         "cash": cash,
     }
     try:
         _write_text(folder / "config.json", json.dumps(config, indent=2) + "\n")
-        _write_text(folder / "prompt.txt", template)
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
         raise
@@ -98,10 +96,10 @@ def _write_equity_png(portfolio, path):
         plt.close(figure)
 
 
-def _execute(folder, symbol, start, end, freq, model, template):
+def _execute(folder, symbol, start, end, freq, strategy):
     prices = load_prices(symbol, start, end, freq)
     bars = prices[symbol]
-    features = build_features(prices, template.feature_set, **template.parameters)
+    features = build_features(prices, strategy.feature_set, **strategy.feature_parameters)
     rows = features.xs(symbol, level="symbol")
     sessions = bars.index
 
@@ -110,11 +108,10 @@ def _execute(folder, symbol, start, end, freq, model, template):
     held = False
     # The last bar has no next session. Warmup rows are not finite, so they are not sent.
     for as_of in sessions[:-1]:
-        values = _finite_values(rows.loc[as_of], template.columns)
+        values = _finite_values(rows.loc[as_of], rows.columns)
         if values is None:
             continue
-        text = render(template, values, "in" if held else "out")
-        action = decide(text, model=model)
+        action = strategy.decide(values, "in" if held else "out")
         decision = place(action, as_of, sessions)
         placed.append(decision)
         logged.append(
@@ -123,7 +120,7 @@ def _execute(folder, symbol, start, end, freq, model, template):
                 "execute_on": decision["execute_on"].isoformat(),
                 "action": decision["action"],
                 "features": values,
-                "text": text,
+                **strategy.detail(),
             }
         )
         if action == "BUY":
@@ -140,26 +137,26 @@ def _execute(folder, symbol, start, end, freq, model, template):
     equity = portfolio.value()
     equity.name = "equity"
     equity.to_csv(folder / "equity.csv")
-    _write_text(folder / "summary.txt", portfolio.stats().to_string() + "\n")
+    stats = portfolio.stats()
+    _write_text(folder / "summary.txt", stats.to_string() + "\n")
+    _write_text(folder / "summary.json", stats.to_json(date_format="iso", indent=2) + "\n")
     _write_equity_png(portfolio, folder / "equity.png")
 
 
-def backtest(symbol, start, end, model, freq, prompt, root=RUNS_DIR):
-    template = load_template(prompt)
-    text = (PROMPTS_DIR / f"{prompt}.json").read_text(encoding="utf-8")
+def backtest(symbol, start, end, freq, strategy, parameters, root=RUNS_DIR):
+    loaded = load_strategy(strategy, parameters)
     folder = record(
         symbol=symbol,
         window={"start": start, "end": end},
         freq=freq,
-        model=model,
-        prompt=prompt,
-        template=text,
+        strategy=strategy,
+        parameters=parameters,
         slippage=SLIPPAGE,
         cash=INIT_CASH,
         root=root,
     )
     try:
-        _execute(folder, symbol, start, end, freq, model, template)
+        _execute(folder, symbol, start, end, freq, loaded)
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
         raise

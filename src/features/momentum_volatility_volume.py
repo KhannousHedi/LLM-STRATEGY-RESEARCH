@@ -1,12 +1,13 @@
-"""The ``default`` feature set.
+"""Momentum, volatility, and volume readings from one symbol's bars.
 
-``compute`` receives one symbol's bars. ``build_features`` loops over symbols
-and stacks the dataframes. ``r1``, ``r5``, and ``r20`` are returns over 1, 5,
-and 20 bars. The caller sets ``ma_window``, ``vol_window``, and
-``volume_window``, as counts of bars. A window that runs past the first bar
-is NaN. ``vol`` stays NaN until ``vol_window`` one-bar returns exist.
-``vol_window`` is at least 2. Standard deviation is the sample standard
-deviation (``ddof=1``).
+``r1``, ``r5``, and ``r20`` are returns over 1, 5, and 20 bars.
+``dist_ma`` is the close against its moving average. ``vol`` is the
+spread of recent one-bar returns. ``vol_ratio`` is the last volume
+against its recent average. The caller sets ``ma_window``,
+``vol_window``, and ``volume_window``, as counts of bars. A window that
+runs past the first bar is NaN. ``vol`` stays NaN until ``vol_window``
+one-bar returns exist. ``vol_window`` is at least 2. Standard deviation
+is the sample standard deviation (``ddof=1``).
 
 The windows are positional and end at t.
 """
@@ -16,8 +17,16 @@ import pandas as pd
 from src.features import FeatureSet
 
 
-class Default(FeatureSet):
+class MomentumVolatilityVolume(FeatureSet):
     columns = ("r1", "r5", "r20", "dist_ma", "vol", "vol_ratio")
+    descriptions = {
+        "r1": "one-bar close-to-close return",
+        "r5": "five-bar close-to-close return",
+        "r20": "twenty-bar close-to-close return",
+        "dist_ma": "distance of the close from its moving average, as a fraction",
+        "vol": "sample standard deviation of recent one-bar returns",
+        "vol_ratio": "last volume divided by its recent average volume",
+    }
 
     def compute(self, bars, ma_window, vol_window, volume_window):
         for name, value in (("ma_window", ma_window), ("volume_window", volume_window)):

@@ -1,6 +1,6 @@
 # LLM strategy backtest
 
-One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. The data store, feature sets, prompts, the model call, the simulation, and the CLI are implemented. Daily bars are stored as one year file per symbol. No finished backtest is stored under `runs/`.
+One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. The data store, feature sets, prompts, the model call, the simulation, and the CLI are implemented. Daily bars are stored as one year file per symbol.
 
 ## Setup
 
@@ -25,31 +25,66 @@ prices = load_prices(["SPY"], "2024-01-01", "2024-12-31", "1D")
 
 ## Features
 
-`build_features` loops over symbols and stacks one dataframe. The index levels are `symbol` and `timestamp`, and `timestamp` is datetimes. A prompt names a feature set and passes `parameters` into this call. Several prompts can name the same set and pass different parameters. The set does not list those prompts.
+`build_features` loops over symbols and stacks one dataframe. The index levels are `symbol` and `timestamp`, and `timestamp` is datetimes. A strategy names a feature set and passes `feature_parameters` into this call. Several strategies can name the same set and pass different parameters. The set does not list those strategies.
+
+Each set declares `columns`, the names it returns, and `descriptions`, one definition per column. Ask the CLI what a set returns before you use it:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.cli features momentum_volatility_volume
+```
+
+```text
+r1: one-bar close-to-close return
+r5: five-bar close-to-close return
+r20: twenty-bar close-to-close return
+dist_ma: distance of the close from its moving average, as a fraction
+vol: sample standard deviation of recent one-bar returns
+vol_ratio: last volume divided by its recent average volume
+```
 
 ```python
 from src.features import build_features
 
 features = build_features(
-    prices, "default", ma_window=20, vol_window=20, volume_window=20
+    prices, "momentum_volatility_volume", ma_window=20, vol_window=20, volume_window=20
 )
 ```
 
-`default` returns `r1`, `r5`, `r20`, `dist_ma`, `vol`, and `vol_ratio`, in that order. The row at time t uses only bars timestamped at or before t. A new set is a `FeatureSet` subclass. It implements `compute` and may add its own arguments. It can inherit `columns` or `compute` from another set.
+`void` returns the bar timestamps and no columns. A strategy that does not name a set gets it. `momentum_volatility_volume` is the set the model decides from. The row at time t uses only bars timestamped at or before t.
 
-## Prompts
+## Parameters and prompts
 
-A prompt is a JSON file in `prompts/` with `feature_set`, `parameters`, and `wording`. `default` names the `default` feature set and passes 20 for `ma_window`, `vol_window`, and `volume_window`. The wording leaves `{features#1}` through `{features#6}` and `{position}`.
+A strategy is built from one parameters dict. There is no separate prompt file type: for `llm`, the prompt text is the `prompt` value in that dict. Parameter files live in `params/`. `params/default.json` is the example for `llm`:
 
-```python
-from src.prompt import load_template, render
-
-template = load_template("default")
-features = build_features(prices, template.feature_set, **template.parameters)
-text = render(template, row, "out")
+```json
+{
+  "feature_set": "momentum_volatility_volume",
+  "feature_parameters": {"ma_window": 20, "vol_window": 20, "volume_window": 20},
+  "model": "qwen3:4b-instruct",
+  "prompt": "Decide ... one-bar return {r1}; ... Position: {position} ..."
+}
 ```
 
-`render` fills a row only when its keys are that set's columns and every value is a finite number. Position is `in` or `out`. Each number is written with six decimal places. The symbol and the calendar date are not inputs.
+The format is one JSON object. `feature_set` and `feature_parameters` are read by the strategy base. Every other key belongs to the strategy: `llm` reads `prompt` and `model`, `dist_ma` reads `buy_above`. The dict is stored unchanged in the run's `config.json`.
+
+### Writing a prompt
+
+1. Pick a feature set and list its columns: `python -m src.cli features momentum_volatility_volume`.
+2. Copy `params/default.json` and edit the `prompt` text.
+3. Write a description, then the slot it describes: `one-bar return {r1}`. The slot is replaced by that column's number, at six decimal places. The model never sees the column name.
+4. Use only the columns you want. A prompt does not have to use every column, and it does not have to use `{position}`.
+5. `{position}` is filled with `in` or `out`.
+
+Building the strategy checks each `{key}` against the set's columns. An unknown key fails before a run folder is made, and the error lists what the set returns. Nothing checks the description in front of a slot, so keep it next to the slot it describes. If you change `feature_parameters`, check the descriptions still match: `ma_window` changes what `dist_ma` measures.
+
+The symbol and the calendar date are not inputs, so they cannot reach the model.
+
+## Strategies
+
+A strategy is a `Strategy` subclass in `src/strategies/{name}.py`, built from one parameters dict. The base reads `feature_set` (default `void`) and `feature_parameters` from that dict, and a subclass reads its own keys. `decide(row, position)` gets every column of that feature set, in the set's order, as finite numbers, plus `in` or `out`, and returns `BUY`, `SELL`, or `HOLD`. The run does not know which strategy it is running.
+
+- `llm` reads `prompt` (required — a run without it raises `ValueError`) and `model` (default `qwen3:4b-instruct`) from the same parameters dict as `feature_set` and `feature_parameters`. Its class defaults are the `momentum_volatility_volume` set with windows of 20. It fills each `{key}` slot with that column's value and `{position}` with the position. Each decision line keeps the filled `text`.
+- `dist_ma` buys while out when `dist_ma` is above `buy_above` (default 0), and sells while in when it is below. Its windows default to 20.
 
 ## Model
 
@@ -84,16 +119,19 @@ pf = simulate(close, opens, entries, exits, "1D")
 
 ## Runs
 
-A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex characters. The folder holds `config.json`, `prompt.txt`, `decisions.jsonl`, `orders.csv`, `equity.csv`, `summary.txt`, and `equity.png`. `config.json` records the prompt name. `prompt.txt` is a copy of that prompt file. Filled session text goes to `decisions.jsonl`. `summary.txt` is the vectorbt stats for the portfolio, including the Sharpe ratio, win rate, and max drawdown. A run that raises or exits is removed. Tests write outside `runs/`.
+A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex characters. The folder holds `config.json`, `decisions.jsonl`, `orders.csv`, `equity.csv`, `summary.txt`, `summary.json`, and `equity.png`. `config.json` records the strategy name and the parameters dict passed to it. A `decisions.jsonl` line has `as_of`, `execute_on`, `action`, `features`, and whatever the strategy's `detail()` adds. `summary.txt` is the vectorbt stats table, including the Sharpe ratio, win rate, and max drawdown, and `summary.json` is the same stats as JSON. A run that raises or exits is removed. Tests write outside `runs/`.
 
 ## CLI
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.cli download SPY --start 2024-01-01 --end 2024-12-31
-.\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2026-09-01 --end 2026-10-23
+.\.venv\Scripts\python.exe -m src.cli features momentum_volatility_volume
+.\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --parameters params/default.json
+.\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --parameters params/default.json --param model=qwen3:1.7b
+.\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --strategy dist_ma --param buy_above=0
 ```
 
-`download` takes one or more symbols. `backtest` takes one `--symbol`, `--start`, `--end`, `--model` (default `qwen3:4b-instruct`), `--freq` (default `1D`), and `--prompt` (default `default`). It prints the run folder when the backtest finishes. It does not download bars.
+`download` takes one or more symbols. `features` takes one feature set name and prints its columns with their definitions. `backtest` takes one `--symbol`, `--start`, `--end`, `--freq` (default `1D`), and `--strategy` (default `llm`). Because the default `llm` strategy requires a `prompt`, a bare `llm` run without parameters fails; pass `--parameters params/default.json` (or `--param prompt=...`). The parameters dict starts from `--parameters PATH`, a JSON object, or `{}`. Each repeated `--param key=value` replaces that key: a value that parses as JSON is that value, so `20` is an integer and an object stays an object, and anything else is a string. It prints the run folder when the backtest finishes. It does not download bars.
 
 ## Tests
 
@@ -105,9 +143,10 @@ A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex chara
 
 ```text
 src/            source
-src/features/   one feature computation per set; prompts name a set
+src/features/   one feature computation per set; void is timestamps only
+src/strategies/ one strategy class per module; the run takes any of them
 tests/          tests
-prompts/        prompt templates (tracked)
+params/         example strategy parameter files (tracked)
 data/bars/      daily year files (local only)
 runs/{id}/      one folder per finished backtest (local only)
 ```

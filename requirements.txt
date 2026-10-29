@@ -4,3 +4,4 @@ vectorbt==1.2.0
 matplotlib==3.11.2
 yfinance==1.7.0
 pytest==9.1.1
+scikit-learn==1.9.1

@@ -106,6 +106,10 @@ A strategy is a `Strategy` subclass in `src/strategies/{name}.py`, built from on
 
 - `llm` reads `prompt` (required — a run without it raises `ValueError`) and `model` (default `qwen3:1.7b`) from the same parameters dict as `feature_set` and `feature_parameters`. Its class defaults are the `momentum_volatility_volume` set with windows of 20. It fills each `{key}` slot with that column's value and `{position}` with the position. Each decision line keeps the filled `text`.
 - `dist_ma` buys while out when `dist_ma` is above `buy_above` (default 0), and sells while in when it is below. Its windows default to 20.
+- `buy_and_hold` uses the `void` feature set, which returns no feature columns, and no parameter keys. The first decision is `BUY`. Every later decision is `HOLD`.
+- `trend_ma200` reads `ma200_gap` from the `classic_indicators` feature set. The feature set computes that column from the feature parameters, including `ma200_window`. The strategy adds no parameter keys. While out, it buys when `ma200_gap > 0`. While in, it sells when `ma200_gap < 0`. A gap of 0 holds. The zero level is a constant.
+- `rsi_reversion` reads `rsi14` from the `classic_indicators` feature set. The feature set computes that column from the feature parameters, including `rsi14_window`. The strategy adds no parameter keys. While out, it buys when `rsi14 < 30`. While in, it sells when `rsi14 > 70`. A reading of 30 or 70 holds. The 30 and 70 levels are constants.
+- `random` uses the `void` feature set, which returns no feature columns. While out, it buys with probability `p_buy`. While in, it sells with probability `p_sell`. The same `seed` and the same position sequence repeat the same actions. It reads `p_buy`, `p_sell`, and `seed`.
 
 ## Model
 

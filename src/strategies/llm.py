@@ -18,6 +18,11 @@ or a bad spec fails before a run folder is made. A prompt does not have
 to use every column. It does not have to use ``{position}`` either.
 Ordinary braces in the prompt, including the reply-schema JSON, are
 left as they are.
+
+``decide`` returns only ``BUY``, ``SELL``, or ``HOLD``. The model's
+analysis and whether the reply parsed are stored for ``detail``, which
+adds ``text``, ``analysis``, and ``parsed``. A fallback HOLD has
+``analysis`` ``""`` and ``parsed`` false.
 """
 
 import re
@@ -66,6 +71,8 @@ class Llm(Strategy):
         self.prompt = parameters["prompt"]
         self.model = parameters.get("model", MODEL)
         self.text = None
+        self.analysis = None
+        self.parsed = None
         columns = load_feature_set(self.feature_set).columns
         matches = list(_SLOT.finditer(self.prompt))
         unknown = sorted(
@@ -94,7 +101,10 @@ class Llm(Strategy):
 
     def decide(self, row, position):
         self.text = _fill(self.prompt, row, position)
-        return ask(self.text, model=self.model)
+        action, analysis, parsed = ask(self.text, model=self.model)
+        self.analysis = analysis
+        self.parsed = parsed
+        return action
 
     def detail(self):
-        return {"text": self.text}
+        return {"text": self.text, "analysis": self.analysis, "parsed": self.parsed}

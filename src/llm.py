@@ -9,8 +9,11 @@ prompt gives, so the reasoning key must sort before the decision key:
 ``analysis`` is written before ``decision`` is chosen. There is no symbol
 field.
 
-A reply that does not match that schema is sent once more. A second
-failure returns ``HOLD``. If the connection fails, the process exits
+A reply that does not match that schema is sent once more. ``decide``
+returns ``(action, analysis, parsed)``. A reply that parses, including
+one that parses on the second try, returns that action, the analysis
+string (which may be empty), and ``True``. A second failure returns
+``("HOLD", "", False)``. If the connection fails, the process exits
 before another request is sent. ``complete``, when passed, returns the
 reply text instead of posting. The unparseable-reply test uses it.
 """
@@ -41,7 +44,7 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def parse_reply(reply):
-    """Return ``BUY``, ``SELL``, or ``HOLD``, or ``None`` when the reply is not the schema."""
+    """Return ``(action, analysis)``, or ``None`` when the reply is not the schema."""
     if not isinstance(reply, str):
         return None
     text = reply.strip().lstrip("\ufeff")
@@ -56,7 +59,7 @@ def parse_reply(reply):
         return None
     if data["decision"] not in ACTIONS or not isinstance(data["analysis"], str):
         return None
-    return data["decision"]
+    return data["decision"], data["analysis"]
 
 
 def _post(text, model, base_url, timeout):
@@ -99,9 +102,10 @@ def decide(text, *, model=MODEL, base_url=BASE_URL, timeout=TIMEOUT, complete=No
         def complete(user_text):
             return _post(user_text, model, base_url, timeout)
 
-    action = parse_reply(complete(text))
-    if action is None:
-        action = parse_reply(complete(text))
-    if action is None:
-        return "HOLD"
-    return action
+    parsed = parse_reply(complete(text))
+    if parsed is None:
+        parsed = parse_reply(complete(text))
+    if parsed is None:
+        return "HOLD", "", False
+    action, analysis = parsed
+    return action, analysis, True

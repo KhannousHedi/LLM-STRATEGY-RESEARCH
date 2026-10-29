@@ -25,7 +25,7 @@ def test_llm_fills_named_slots(monkeypatch):
     def fake_ask(text, model=None):
         seen["text"] = text
         seen["model"] = model
-        return "BUY"
+        return "BUY", "uptrend", True
 
     monkeypatch.setattr(llm_module, "ask", fake_ask)
     strategy = load_strategy(
@@ -35,14 +35,18 @@ def test_llm_fills_named_slots(monkeypatch):
     action = strategy.decide({"r1": 0.0125, "r5": -0.034}, "out")
     assert action == "BUY"
     assert seen["text"] == "A 0.012500 B -0.034000 Position: out"
-    assert strategy.detail() == {"text": "A 0.012500 B -0.034000 Position: out"}
+    assert strategy.detail() == {
+        "text": "A 0.012500 B -0.034000 Position: out",
+        "analysis": "uptrend",
+        "parsed": True,
+    }
 
 
 def test_llm_may_use_only_some_features(monkeypatch):
-    monkeypatch.setattr(llm_module, "ask", lambda text, model=None: "HOLD")
+    monkeypatch.setattr(llm_module, "ask", lambda text, model=None: ("HOLD", "", False))
     strategy = load_strategy("llm", {"prompt": "only {dist_ma}"})
     assert strategy.decide({"dist_ma": 0.01}, "in") == "HOLD"
-    assert strategy.detail() == {"text": "only 0.010000"}
+    assert strategy.detail() == {"text": "only 0.010000", "analysis": "", "parsed": False}
 
 
 def test_llm_key_missing_from_the_row_raises():

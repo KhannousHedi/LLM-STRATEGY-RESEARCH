@@ -11,7 +11,7 @@ def _capture(monkeypatch):
 
     def fake_ask(text, model=None):
         seen["text"] = text
-        return "HOLD"
+        return "HOLD", "flat", True
 
     monkeypatch.setattr(llm_module, "ask", fake_ask)
     return seen
@@ -41,7 +41,7 @@ def test_slots_render_with_their_format_specs(monkeypatch):
     )
     rendered = "-1.23% +0.00% 18.20% 71.4 0.82 1.45x"
     assert seen["text"] == rendered
-    assert strategy.detail() == {"text": rendered}
+    assert strategy.detail() == {"text": rendered, "analysis": "flat", "parsed": True}
 
 
 def test_bare_slot_stays_six_decimal_places(monkeypatch):

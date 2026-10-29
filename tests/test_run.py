@@ -219,3 +219,54 @@ def test_backtest_rejects_a_bad_or_negative_warmup(tmp_path, monkeypatch):
             _run(tmp_path, warmup=warmup)
     assert calls == []
     assert list(tmp_path.iterdir()) == []
+
+
+def _summary(folder):
+    return json.loads((folder / "summary.json").read_text(encoding="utf-8"))
+
+
+def test_backtest_summary_has_null_holding_period_when_flat(tmp_path, monkeypatch):
+    before = sorted(path.name for path in RUNS.iterdir())
+    _install_prices(monkeypatch)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _ignore_vectorbt_rename_warning()
+        folder = backtest(
+            SYMBOL,
+            START,
+            END,
+            FREQ,
+            "random",
+            {"p_buy": 0, "p_sell": 0, "seed": 1},
+            root=tmp_path,
+        )
+
+    summary = _summary(folder)
+    assert summary["time_in_market"] == 0
+    assert summary["avg_holding_period"] is None
+    assert summary["Total Trades"] == 0
+    assert "n_trades" not in summary
+    text = (folder / "summary.txt").read_text(encoding="utf-8")
+    assert "time_in_market" in text
+    assert "avg_holding_period" in text
+    assert "null" in text
+    assert sorted(path.name for path in RUNS.iterdir()) == before
+
+
+def test_backtest_summary_covers_an_open_trade_through_the_last_session(tmp_path, monkeypatch):
+    before = sorted(path.name for path in RUNS.iterdir())
+    _install_prices(monkeypatch)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _ignore_vectorbt_rename_warning()
+        folder = backtest(SYMBOL, START, END, FREQ, "buy_and_hold", {}, root=tmp_path)
+
+    summary = _summary(folder)
+    assert summary["time_in_market"] == pytest.approx(29 / 30)
+    assert summary["avg_holding_period"] == 29
+    assert summary["Total Trades"] == 1
+    assert "n_trades" not in summary
+    text = (folder / "summary.txt").read_text(encoding="utf-8")
+    assert "time_in_market" in text
+    assert "avg_holding_period" in text
+    assert sorted(path.name for path in RUNS.iterdir()) == before

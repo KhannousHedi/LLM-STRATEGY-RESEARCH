@@ -198,7 +198,8 @@ def _execute(folder, symbol, start, end, freq, strategy, warmup, slippage, trans
     opens = bars["open"]
     entries, exits = signals(placed, sessions)
     portfolio = simulate(close, opens, entries, exits, freq, slippage, transaction_cost)
-    portfolio.orders.records_readable.to_csv(folder / "orders.csv", index=False)
+    orders = portfolio.orders.records_readable
+    orders.to_csv(folder / "orders.csv", index=False)
     equity = portfolio.value()
     equity.name = "equity"
     equity.to_csv(folder / "equity.csv")

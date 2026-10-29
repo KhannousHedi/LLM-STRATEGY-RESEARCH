@@ -144,7 +144,7 @@ pf = simulate(close, opens, entries, exits, "1D")
 
 ## Runs
 
-A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex characters. The folder holds `config.json`, `decisions.jsonl`, `orders.csv`, `equity.csv`, `summary.txt`, `summary.json`, and `equity.png`. A backtest loads bars from `--start` minus the warmup offset for features only. Decisions and simulation begin at `--start`. `config.json` records the strategy name, the parameters dict passed to it, `warmup`, and `transaction_cost` immediately after `slippage`. Non-finite features in the window raise one warning. A `decisions.jsonl` line has `as_of`, `execute_on`, `action`, `features`, and whatever the strategy's `detail()` adds. `summary.txt` is the vectorbt stats table, including the Sharpe ratio, win rate, and max drawdown, and `summary.json` is the same stats as JSON. A run that raises or exits is removed. Tests write outside `runs/`.
+A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex characters. The folder holds `config.json`, `decisions.jsonl`, `orders.csv`, `equity.csv`, `summary.txt`, `summary.json`, and `equity.png`. A backtest loads bars from `--start` minus the warmup offset for features only. Decisions and simulation begin at `--start`. `config.json` records the strategy name, the parameters dict passed to it, `warmup`, and `transaction_cost` immediately after `slippage`. Non-finite features in the window raise one warning. A `decisions.jsonl` line has `as_of`, `execute_on`, `action`, `features`, and whatever the strategy's `detail()` adds. `summary.txt` is the vectorbt stats table, including the Sharpe ratio, win rate, and max drawdown, plus `time_in_market` and `avg_holding_period`. `summary.json` is the same stats plus those two fields. `Total Trades` remains the trade count. `avg_holding_period` is null when there are no trades. A run that raises or exits is removed. Tests write outside `runs/`.
 
 ## CLI
 
@@ -171,9 +171,12 @@ src/            source
 src/features/   one feature computation per set; void is timestamps only
 src/strategies/ one strategy class per module; the run takes any of them
 tests/          tests
+scripts/objective1.py       Objective 1 comparison table
+scripts/test_objective1.py  tests for that script
 params/         example strategy parameter files (tracked)
 data/bars/      daily year files (local only)
 runs/{id}/      one folder per finished backtest (local only)
+comparisons/objective1/     Objective 1 comparison tables (local only)
 ```
 
 ## Adding a feature set

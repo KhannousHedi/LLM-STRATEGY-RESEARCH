@@ -4,10 +4,15 @@
 ``features`` takes one feature set name and prints each column it
 returns, with its definition. ``backtest`` takes one ``--symbol``,
 ``--start``, ``--end``, ``--freq``, ``--strategy``, an optional JSON
-``--parameters`` file, and repeated ``--param key=value``. ``--freq``
-defaults to ``1D``. ``--strategy`` defaults to ``llm``. A ``--param``
-value that parses as JSON is that value. Otherwise it stays a string.
-It replaces that key in the dict.
+``--parameters`` file, repeated ``--param key=value``, an optional
+``--warmup`` offset, an optional ``--slippage``, and an optional
+``--transaction-cost``. ``--freq`` defaults to ``1D``. ``--strategy``
+defaults to ``llm``. ``--warmup`` is a pandas offset such as ``400D`` or
+``13MS``, defaulting to the run's value. ``--slippage`` defaults to the
+run's value. ``--transaction-cost`` is a fraction of order value,
+defaulting to the run's value. A ``--param`` value that parses as JSON
+is that value. Otherwise it stays a string. It replaces that key in the
+dict.
 
 There is no symbol-count check. The strategy checks its own parameters.
 Coverage warnings stay in the loader. A finished year file is left as it
@@ -41,6 +46,9 @@ def build_parser():
     run.add_argument("--strategy", default="llm")
     run.add_argument("--parameters", metavar="PATH")
     run.add_argument("--param", action="append", default=[], metavar="key=value")
+    run.add_argument("--warmup", metavar="OFFSET")
+    run.add_argument("--slippage", type=float)
+    run.add_argument("--transaction-cost", type=float)
     return parser
 
 
@@ -82,7 +90,19 @@ def main(argv=None):
     parameters = _parameters(parser, args)
     from src.run import backtest
 
-    print(backtest(args.symbol, args.start, args.end, args.freq, args.strategy, parameters))
+    print(
+        backtest(
+            args.symbol,
+            args.start,
+            args.end,
+            args.freq,
+            args.strategy,
+            parameters,
+            warmup=args.warmup,
+            slippage=args.slippage,
+            transaction_cost=args.transaction_cost,
+        )
+    )
 
 
 if __name__ == "__main__":

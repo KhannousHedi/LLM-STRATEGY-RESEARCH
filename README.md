@@ -30,7 +30,7 @@ download_bars(["SPY"], "2024-01-01", "2024-12-31")
 prices = load_prices(["SPY"], "2024-01-01", "2024-12-31", "1D")
 ```
 
-`download_bars` asks Yahoo for `1d` bars, unadjusted, regular session. A missing year is always fetched from January 1 through December 31, even when the requested range is shorter. A finished year that already has a file is left as it is. The current UTC year is replaced through the last finished session. Today and later dates are not requested. `load_prices` reads the store and does not call Yahoo. It warns about missing weekdays and returns the rows inside the requested range. `1D` is those daily rows. Weekly and monthly resample them: open is the first, high is the max, low is the min, close is the last, and volume is the sum.
+`download_bars` asks Yahoo for `1d` bars, unadjusted, regular session. A missing year is always fetched from January 1 through December 31, even when the requested range is shorter. A finished year that already has a file is left as it is. The current UTC year is replaced through the last finished session. Today and later dates are not requested. `load_prices` reads the store and does not call Yahoo. It warns once per symbol about missing weekdays, with a truncated list of the dates, and returns the rows inside the requested range. `1D` is those daily rows. Weekly and monthly resample them: open is the first, high is the max, low is the min, close is the last, and volume is the sum.
 
 ## Features
 
@@ -118,7 +118,7 @@ entries, exits = signals([record], sessions)
 
 ## Simulation
 
-`simulate` passes those booleans to vectorbt unchanged. The fill price is that session's open. Cash is 100,000, slippage is 0.0005, and fees are 0.
+`simulate` passes those booleans to vectorbt unchanged. The fill price is that session's open. Cash is 100,000. Slippage defaults to 0.0005. The transaction cost defaults to 0.001, a fraction of order value, and is passed to vectorbt as fees.
 
 ```python
 from src.simulate import simulate
@@ -128,7 +128,7 @@ pf = simulate(close, opens, entries, exits, "1D")
 
 ## Runs
 
-A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex characters. The folder holds `config.json`, `decisions.jsonl`, `orders.csv`, `equity.csv`, `summary.txt`, `summary.json`, and `equity.png`. `config.json` records the strategy name and the parameters dict passed to it. A `decisions.jsonl` line has `as_of`, `execute_on`, `action`, `features`, and whatever the strategy's `detail()` adds. `summary.txt` is the vectorbt stats table, including the Sharpe ratio, win rate, and max drawdown, and `summary.json` is the same stats as JSON. A run that raises or exits is removed. Tests write outside `runs/`.
+A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex characters. The folder holds `config.json`, `decisions.jsonl`, `orders.csv`, `equity.csv`, `summary.txt`, `summary.json`, and `equity.png`. A backtest loads bars from `--start` minus the warmup offset for features only. Decisions and simulation begin at `--start`. `config.json` records the strategy name, the parameters dict passed to it, `warmup`, and `transaction_cost` immediately after `slippage`. Non-finite features in the window raise one warning. A `decisions.jsonl` line has `as_of`, `execute_on`, `action`, `features`, and whatever the strategy's `detail()` adds. `summary.txt` is the vectorbt stats table, including the Sharpe ratio, win rate, and max drawdown, and `summary.json` is the same stats as JSON. A run that raises or exits is removed. Tests write outside `runs/`.
 
 ## CLI
 
@@ -140,7 +140,7 @@ A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex chara
 .\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --strategy dist_ma --param buy_above=0
 ```
 
-`download` takes one or more symbols. `features` takes one feature set name and prints its columns with their definitions. `backtest` takes one `--symbol`, `--start`, `--end`, `--freq` (default `1D`), and `--strategy` (default `llm`). Because the default `llm` strategy requires a `prompt`, a bare `llm` run without parameters fails; pass `--parameters params/default.json` (or `--param prompt=...`). The parameters dict starts from `--parameters PATH`, a JSON object, or `{}`. Each repeated `--param key=value` replaces that key: a value that parses as JSON is that value, so `20` is an integer and an object stays an object, and anything else is a string. It prints the run folder when the backtest finishes. It does not download bars.
+`download` takes one or more symbols. `features` takes one feature set name and prints its columns with their definitions. `backtest` takes one `--symbol`, `--start`, `--end`, `--freq` (default `1D`), `--strategy` (default `llm`), `--warmup` (a pandas offset such as `400D` or `13MS`, default `400D`), `--slippage` (default `0.0005`), and `--transaction-cost` (a fraction of order value, default `0.001`). Because the default `llm` strategy requires a `prompt`, a bare `llm` run without parameters fails; pass `--parameters params/default.json` (or `--param prompt=...`). The parameters dict starts from `--parameters PATH`, a JSON object, or `{}`. Each repeated `--param key=value` replaces that key: a value that parses as JSON is that value, so `20` is an integer and an object stays an object, and anything else is a string. It prints the run folder when the backtest finishes. It does not download bars.
 
 ## Tests
 

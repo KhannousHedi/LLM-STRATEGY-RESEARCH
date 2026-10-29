@@ -1,9 +1,11 @@
 """Fill booleans with vectorbt at the session open.
 
-``simulate(close, opens, entries, exits, freq)`` calls
-``Portfolio.from_signals`` with the boolean index as given. ``price``
-is that session's open. Nothing is shifted, and the timestamps are not
-checked again. Cash is 100,000. Slippage is 0.0005. Fees are 0.
+``simulate(close, opens, entries, exits, freq, slippage, transaction_cost)``
+calls ``Portfolio.from_signals`` with the boolean index as given.
+``price`` is that session's open. Nothing is shifted, and the timestamps
+are not checked again. Cash is 100,000. Slippage defaults to 0.0005. The
+transaction cost defaults to 0.001, a fraction of order value, and is
+passed as fees.
 """
 
 import numpy as np
@@ -11,10 +13,10 @@ import vectorbt as vbt
 
 INIT_CASH = 100_000
 SLIPPAGE = 0.0005
-FEES = 0.0
+TRANSACTION_COST = 0.001
 
 
-def simulate(close, opens, entries, exits, freq):
+def simulate(close, opens, entries, exits, freq, slippage=SLIPPAGE, transaction_cost=TRANSACTION_COST):
     return vbt.Portfolio.from_signals(
         close,
         entries,
@@ -24,7 +26,7 @@ def simulate(close, opens, entries, exits, freq):
         cash_sharing=False,
         direction="longonly",
         size=np.inf,
-        fees=FEES,
-        slippage=SLIPPAGE,
+        slippage=slippage,
+        fees=transaction_cost,
         freq=freq,
     )

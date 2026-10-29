@@ -10,10 +10,21 @@ from pandas.tseries.frequencies import to_offset
 BARS_DIR = Path(__file__).resolve().parent.parent / "data" / "bars"
 COLUMNS = ["open", "high", "low", "close", "volume"]
 BASE_FREQ = "1D"
+MAX_LISTED_MISSING_WEEKDAYS = 3
 
 
 def as_date(value):
     return pd.Timestamp(value).date()
+
+
+def _missing_weekdays_message(symbol, start, end, missing):
+    count = len(missing)
+    noun = "weekday" if count == 1 else "weekdays"
+    shown = missing[:MAX_LISTED_MISSING_WEEKDAYS]
+    listed = ", ".join(day.isoformat() for day in shown)
+    if count > MAX_LISTED_MISSING_WEEKDAYS:
+        listed = f"{listed}, and {count - MAX_LISTED_MISSING_WEEKDAYS} more"
+    return f"{symbol}: {start.isoformat()} to {end.isoformat()} is missing {count} {noun}: {listed}"
 
 
 def weekdays(start, end):
@@ -61,11 +72,7 @@ def _load_symbol(symbol, start, end, freq, root):
     covered = set(bars.index.date)
     missing = [day for day in weekdays(start, end) if day not in covered]
     if missing:
-        listed = ", ".join(day.isoformat() for day in missing)
-        warnings.warn(
-            f"{symbol}: {start.isoformat()} to {end.isoformat()} is missing weekdays {listed}",
-            stacklevel=3,
-        )
+        warnings.warn(_missing_weekdays_message(symbol, start, end, missing), stacklevel=3)
 
     if to_offset(freq) == to_offset(BASE_FREQ):
         return bars

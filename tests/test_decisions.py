@@ -3,7 +3,7 @@ import pandas as pd
 from src.decisions import place, signals
 from src.simulate import simulate
 
-SLIPPAGE = 0.0005
+SLIPPAGE = 0.01
 
 
 def test_buy_fills_next_open():
@@ -21,9 +21,10 @@ def test_buy_fills_next_open():
     assert entries.tolist() == [False, True]
     assert exits.tolist() == [False, False]
 
-    orders = simulate(close, opens, entries, exits, "1D").orders.records_readable
+    orders = simulate(close, opens, entries, exits, "1D", slippage=SLIPPAGE).orders.records_readable
     assert len(orders) == 1
     filled = orders.iloc[0]
     assert filled["Timestamp"] == sessions[1]
     assert filled["Side"] == "Buy"
     assert filled["Price"] == opens.iloc[1] * (1 + SLIPPAGE)
+    assert filled["Fees"] > 0

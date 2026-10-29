@@ -59,6 +59,8 @@ features = build_features(
 )
 ```
 
+`classic_indicators` returns `r1`, `r5`, `r20`, `ma50_gap`, `ma200_gap`, `high52_gap`, `rsi14`, `vol20`, `volume_ratio`, `open_gap`, `day_range`, and `close_location`. Its windows are keyword parameters with textbook defaults: `r1_window` 1, `r5_window` 5, `r20_window` 20, `ma50_window` 50, `ma200_window` 200, `high52_window` 252, `rsi14_window` 14, `vol20_window` 20, and `volume_window` 20. `open_gap`, `day_range`, and `close_location` have no window. The printed definition of each windowed column names that parameter. Objective 1's parameter files leave these windows at the defaults. Any other run may pass different windows.
+
 `void` returns the bar timestamps and no columns. A strategy that does not name a set gets it. `momentum_volatility_volume` is the set the model decides from. The row at time t uses only bars timestamped at or before t.
 
 ## Parameters and prompts
@@ -80,11 +82,21 @@ The format is one JSON object. `feature_set` and `feature_parameters` are read b
 
 1. Pick a feature set and list its columns: `python -m src.cli features momentum_volatility_volume`.
 2. Copy `params/default.json` and edit the `prompt` text.
-3. Write a description, then the slot it describes: `one-bar return {r1}`. The slot is replaced by that column's number, at six decimal places. The model never sees the column name.
+3. Write a description, then the slot it describes: `one-bar return {r1}`. A slot is `{column}` (six decimal places) or `{column:spec}` with any Python format spec. The model never sees the column name.
 4. Use only the columns you want. A prompt does not have to use every column, and it does not have to use `{position}`.
-5. `{position}` is filled with `in` or `out`.
+5. `{position}` is filled with `in` or `out`. It takes no format spec.
 
-Building the strategy checks each `{key}` against the set's columns. An unknown key fails before a run folder is made, and the error lists what the set returns. Nothing checks the description in front of a slot, so keep it next to the slot it describes. If you change `feature_parameters`, check the descriptions still match: `ma_window` changes what `dist_ma` measures.
+A spec on a fraction column needs `%`, because the stored number is a fraction (`0.021` with `{r1:+.2%}` is `+2.10%`). Nothing checks the scale.
+
+| Columns | Slot | Rendered |
+|---|---|---|
+| `r1`, `r5`, `r20`, `ma50_gap`, `ma200_gap`, `high52_gap`, `open_gap` | `{r1:+.2%}` | `-1.23%`, `+2.10%`, zero is `+0.00%` |
+| `vol20`, `day_range` | `{vol20:.2%}` | `18.20%`, `1.10%` |
+| `rsi14` | `{rsi14:.1f}` | `71.4` |
+| `close_location` | `{close_location:.2f}` | `0.82` |
+| `volume_ratio` | `{volume_ratio:.2f}x` | `1.45x` |
+
+The `x` after `{volume_ratio:.2f}` is a literal character. Building the strategy checks each `{key}` against the set's columns and dry-runs each spec. An unknown key or a bad spec fails before a run folder is made, and the unknown-key error lists what the set returns. Nothing checks the description in front of a slot, so keep it next to the slot it describes. If you change `feature_parameters`, check the descriptions still match: `ma_window` changes what `dist_ma` measures. `classic_indicators` descriptions name their parameters, so changing a window does not make those lines stale.
 
 The symbol and the calendar date are not inputs, so they cannot reach the model.
 
@@ -182,6 +194,7 @@ class Example(FeatureSet):
 - `columns` is a tuple of unique identifiers, in the order `compute` returns them. No column may be named `position`.
 - `descriptions` defines every column in one line. `python -m src.cli features {name}` prints these lines. Say what the number means.
 - `compute` takes one symbol's bars and the keyword arguments the set adds. It returns a dataframe indexed by that symbol's datetimes, with exactly `columns`. `build_features` checks this on every call.
+- A set may take window keywords with defaults, as `classic_indicators` does.
 - Row t uses only bars at or before t. The next session is `place` in `src/decisions.py`.
 - A set with no values sets `columns = ()` and `descriptions = {}` and returns `pd.DataFrame(index=bars.index)`. `void` is that set.
 

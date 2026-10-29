@@ -7,13 +7,17 @@ name. There is no prompt file of its own: a file such as
 ``params/default.json`` is a parameters file passed with
 ``--parameters``, and its ``prompt`` value is the text.
 
-A slot is ``{key}``, where key is one column of the feature set, or
-``{position}``. Run `python -m src.cli features {feature_set}` to see
+A slot is ``{key}`` or ``{key:spec}``, where key is one column of the
+feature set, or ``{position}``. ``{key}`` renders at six decimal places.
+``{key:spec}`` renders with that Python format spec, and only the spec
+string is passed to ``format``. ``{position}`` is ``in`` or ``out`` and
+takes no spec. Run `python -m src.cli features {feature_set}` to see
 the keys and what each one means. Building the strategy checks every
-key it uses against that set, so an unknown key fails before a run
-folder is made. A prompt does not have to use every column. It does not
-have to use ``{position}`` either. Ordinary braces in the prompt,
-including the reply-schema JSON, are left as they are.
+key it uses against that set and dry-runs every spec, so an unknown key
+or a bad spec fails before a run folder is made. A prompt does not have
+to use every column. It does not have to use ``{position}`` either.
+Ordinary braces in the prompt, including the reply-schema JSON, are
+left as they are.
 """
 
 import re
@@ -22,7 +26,7 @@ from src.features import load_feature_set
 from src.llm import MODEL, decide as ask
 from src.strategies import Strategy
 
-_SLOT = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_SLOT = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)(?::([^{}]*))?\}")
 
 
 def _fill(prompt, row, position):
@@ -31,12 +35,17 @@ def _fill(prompt, row, position):
 
     def replace(match):
         key = match.group(1)
+        spec = match.group(2)
         if key == "position":
+            if spec is not None:
+                raise ValueError(f"llm prompt slot {{position:{spec}}} takes no format spec")
             return position
         if key not in row:
             available = ", ".join(row) or "none"
             raise ValueError(f"prompt uses {{{key}}}, which is not a feature. The row has: {available}")
-        return format(row[key], ".6f")
+        if spec is None:
+            return format(row[key], ".6f")
+        return format(row[key], spec)
 
     return _SLOT.sub(replace, prompt)
 
@@ -58,7 +67,10 @@ class Llm(Strategy):
         self.model = parameters.get("model", MODEL)
         self.text = None
         columns = load_feature_set(self.feature_set).columns
-        unknown = sorted({key for key in _SLOT.findall(self.prompt) if key != "position" and key not in columns})
+        matches = list(_SLOT.finditer(self.prompt))
+        unknown = sorted(
+            {match.group(1) for match in matches if match.group(1) != "position" and match.group(1) not in columns}
+        )
         if unknown:
             used = ", ".join("{" + key + "}" for key in unknown)
             available = ", ".join(columns) or "none"
@@ -66,6 +78,19 @@ class Llm(Strategy):
                 f"llm prompt uses {used}, which feature_set {self.feature_set!r} does not return. "
                 f"It returns: {available}"
             )
+        for match in matches:
+            key = match.group(1)
+            spec = match.group(2)
+            if key == "position":
+                if spec is not None:
+                    raise ValueError(f"llm prompt slot {{position:{spec}}} takes no format spec")
+                continue
+            if spec is None:
+                continue
+            try:
+                format(0.5, spec)
+            except (ValueError, TypeError) as error:
+                raise ValueError(f"llm prompt slot {{{key}:{spec}}} is not a valid format spec") from error
 
     def decide(self, row, position):
         self.text = _fill(self.prompt, row, position)

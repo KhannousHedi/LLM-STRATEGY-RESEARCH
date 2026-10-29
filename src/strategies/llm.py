@@ -2,7 +2,7 @@
 
 The parameters dict is the one dict for this strategy. The base reads
 ``feature_set`` and ``feature_parameters`` from it; this class also reads
-``prompt`` (required) and ``model`` (absent, ``qwen3:4b-instruct``) by
+``prompt`` (required) and ``model`` (absent, ``qwen3:1.7b``) by
 name. There is no prompt file of its own: a file such as
 ``params/default.json`` is a parameters file passed with
 ``--parameters``, and its ``prompt`` value is the text.

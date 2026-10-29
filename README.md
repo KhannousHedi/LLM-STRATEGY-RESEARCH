@@ -1,6 +1,15 @@
 # LLM strategy backtest
 
-One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. The data store, feature sets, prompts, the model call, the simulation, and the CLI are implemented. Daily bars are stored as one year file per symbol.
+One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. Daily bars are stored as one year file per symbol. This file is the contract for a run and for adding a feature set or a strategy.
+
+## Invariants
+
+- One rule lives in one file. The next file trusts that result.
+- Bars are downloaded once into `data/bars/`. A finished backtest writes only under its own folder in `runs/`.
+- The row at time t uses only bars timestamped at or before t. `place` names the next session, and `simulate` fills that session's open.
+- The symbol and the calendar date are not inputs, so they cannot reach the model.
+- A strategy returns `BUY`, `SELL`, or `HOLD`. It does not download, resample, call vectorbt, or assign `execute_on`. The run loop owns the position.
+- A new feature set or strategy is a new module under the existing base class. A change to what `FeatureSet` or `Strategy` guarantees changes that base class and this file.
 
 ## Setup
 
@@ -60,7 +69,7 @@ A strategy is built from one parameters dict. There is no separate prompt file t
 {
   "feature_set": "momentum_volatility_volume",
   "feature_parameters": {"ma_window": 20, "vol_window": 20, "volume_window": 20},
-  "model": "qwen3:4b-instruct",
+  "model": "qwen3:1.7b",
   "prompt": "Decide ... one-bar return {r1}; ... Position: {position} ..."
 }
 ```
@@ -83,12 +92,12 @@ The symbol and the calendar date are not inputs, so they cannot reach the model.
 
 A strategy is a `Strategy` subclass in `src/strategies/{name}.py`, built from one parameters dict. The base reads `feature_set` (default `void`) and `feature_parameters` from that dict, and a subclass reads its own keys. `decide(row, position)` gets every column of that feature set, in the set's order, as finite numbers, plus `in` or `out`, and returns `BUY`, `SELL`, or `HOLD`. The run does not know which strategy it is running.
 
-- `llm` reads `prompt` (required — a run without it raises `ValueError`) and `model` (default `qwen3:4b-instruct`) from the same parameters dict as `feature_set` and `feature_parameters`. Its class defaults are the `momentum_volatility_volume` set with windows of 20. It fills each `{key}` slot with that column's value and `{position}` with the position. Each decision line keeps the filled `text`.
+- `llm` reads `prompt` (required — a run without it raises `ValueError`) and `model` (default `qwen3:1.7b`) from the same parameters dict as `feature_set` and `feature_parameters`. Its class defaults are the `momentum_volatility_volume` set with windows of 20. It fills each `{key}` slot with that column's value and `{position}` with the position. Each decision line keeps the filled `text`.
 - `dist_ma` buys while out when `dist_ma` is above `buy_above` (default 0), and sells while in when it is below. Its windows default to 20.
 
 ## Model
 
-`decide` sends that text to Ollama: model `qwen3:4b-instruct` at `http://127.0.0.1:11434`, temperature 0, thinking off. The reply has to be a JSON object with `action` of `BUY`, `SELL`, or `HOLD` and a string `reason`. Anything else is sent once more, then becomes `HOLD`. If Ollama is down, the call exits.
+`decide` sends that text to Ollama: model `qwen3:1.7b` at `http://127.0.0.1:11434`, temperature 0, thinking off. The reply has to be a JSON object with a string `analysis` and a `decision` of `BUY`, `SELL`, or `HOLD`. Ollama writes the keys in alphabetical order, whatever order the schema or the prompt gives, so the model writes its `analysis` before it picks the `decision`. A renamed key must keep the reasoning key sorting first. A prompt's reply line lists them in that order. Anything else is sent once more, then becomes `HOLD`. If Ollama is down, the call exits.
 
 ```python
 from src.llm import decide
@@ -127,7 +136,7 @@ A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex chara
 .\.venv\Scripts\python.exe -m src.cli download SPY --start 2024-01-01 --end 2024-12-31
 .\.venv\Scripts\python.exe -m src.cli features momentum_volatility_volume
 .\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --parameters params/default.json
-.\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --parameters params/default.json --param model=qwen3:1.7b
+.\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --parameters params/default.json --param model=qwen3:4b-instruct
 .\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --strategy dist_ma --param buy_above=0
 ```
 
@@ -150,3 +159,73 @@ params/         example strategy parameter files (tracked)
 data/bars/      daily year files (local only)
 runs/{id}/      one folder per finished backtest (local only)
 ```
+
+## Adding a feature set
+
+Create `src/features/{name}.py`. The name is an identifier and does not start with `_`. Define one `FeatureSet` subclass in that module.
+
+```python
+import pandas as pd
+
+from src.features import FeatureSet
+
+
+class Example(FeatureSet):
+    columns = ("r1",)
+    descriptions = {"r1": "one-bar close-to-close return"}
+
+    def compute(self, bars, window):
+        close = bars["close"]
+        return pd.DataFrame({"r1": close.pct_change(window)}, index=bars.index)
+```
+
+- `columns` is a tuple of unique identifiers, in the order `compute` returns them. No column may be named `position`.
+- `descriptions` defines every column in one line. `python -m src.cli features {name}` prints these lines. Say what the number means.
+- `compute` takes one symbol's bars and the keyword arguments the set adds. It returns a dataframe indexed by that symbol's datetimes, with exactly `columns`. `build_features` checks this on every call.
+- Row t uses only bars at or before t. The next session is `place` in `src/decisions.py`.
+- A set with no values sets `columns = ()` and `descriptions = {}` and returns `pd.DataFrame(index=bars.index)`. `void` is that set.
+
+Check it:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.cli features example
+.\.venv\Scripts\python.exe -m pytest tests/test_features.py
+```
+
+## Adding a strategy
+
+Create `src/strategies/{name}.py`. The name is an identifier and does not start with `_`. Define one `Strategy` subclass in that module.
+
+```python
+from src.strategies import Strategy
+
+
+class Example(Strategy):
+    feature_set = "momentum_volatility_volume"
+    feature_parameters = {"ma_window": 20, "vol_window": 20, "volume_window": 20}
+
+    def __init__(self, parameters):
+        super().__init__(parameters)
+        self.threshold = parameters.get("threshold", 0)
+
+    def decide(self, row, position):
+        if position == "out" and row["dist_ma"] > self.threshold:
+            return "BUY"
+        if position == "in" and row["dist_ma"] < self.threshold:
+            return "SELL"
+        return "HOLD"
+```
+
+- Set `feature_set` and `feature_parameters` on the class when the strategy needs a set other than `void`, or parameters other than none. The base reads those two keys from the parameters dict and keeps the class values when a key is absent.
+- Read every other key by name in `__init__`, after `super().__init__(parameters)`, and store it on `self`. A key the strategy must have fails there, as `llm` does without a `prompt`. Building happens before a run folder is made.
+- `decide(row, position)` gets every column of the feature set as finite numbers, by name, and `in` or `out`. It returns `BUY`, `SELL`, or `HOLD`. The run owns the position. A strategy may keep earlier rows on `self`.
+- A strategy does not get the feature frame, the portfolio, or a later bar. It does not download, resample, call vectorbt, or assign `execute_on`.
+- `detail()` is optional. Return a dict and it is merged into that bar's `decisions.jsonl` line.
+
+Pass parameters as one JSON object with `--parameters`, or override keys with repeated `--param key=value`. See Parameters and prompts for the file format.
+
+```powershell
+.\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --strategy example --param threshold=0.01
+```
+
+Add a test in `tests/test_strategies.py`: build it with `load_strategy` and assert one `decide` result. The test does not call the model and does not write under `runs/`.

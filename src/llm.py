@@ -1,9 +1,12 @@
 """Ask Ollama for one action.
 
 ``decide(text)`` posts the rendered user text to ``/api/chat``. The model
-is ``qwen3:4b-instruct`` at ``http://127.0.0.1:11434``. Temperature is 0
-and thinking is off. The reply schema is an object with ``action`` of
-``BUY``, ``SELL``, or ``HOLD`` and a string ``reason``. There is no symbol
+is ``qwen3:1.7b`` at ``http://127.0.0.1:11434``. Temperature is 0
+and thinking is off. The reply schema is an object with a string
+``analysis`` and a ``decision`` of ``BUY``, ``SELL``, or ``HOLD``. Ollama
+writes the keys in alphabetical order, whatever order the schema or the
+prompt gives, so the reasoning key must sort before the decision key:
+``analysis`` is written before ``decision`` is chosen. There is no symbol
 field.
 
 A reply that does not match that schema is sent once more. A second
@@ -18,7 +21,7 @@ import sys
 import urllib.error
 import urllib.request
 
-MODEL = "qwen3:4b-instruct"
+MODEL = "qwen3:1.7b"
 BASE_URL = "http://127.0.0.1:11434"
 TIMEOUT = 120
 ACTIONS = ("BUY", "SELL", "HOLD")
@@ -26,10 +29,10 @@ ACTIONS = ("BUY", "SELL", "HOLD")
 SCHEMA = {
     "type": "object",
     "properties": {
-        "action": {"type": "string", "enum": list(ACTIONS)},
-        "reason": {"type": "string"},
+        "analysis": {"type": "string"},
+        "decision": {"type": "string", "enum": list(ACTIONS)},
     },
-    "required": ["action", "reason"],
+    "required": ["analysis", "decision"],
 }
 
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL | re.IGNORECASE)
@@ -49,11 +52,11 @@ def parse_reply(reply):
         data = json.loads(text)
     except json.JSONDecodeError:
         return None
-    if not isinstance(data, dict) or set(data) != {"action", "reason"}:
+    if not isinstance(data, dict) or set(data) != {"analysis", "decision"}:
         return None
-    if data["action"] not in ACTIONS or not isinstance(data["reason"], str):
+    if data["decision"] not in ACTIONS or not isinstance(data["analysis"], str):
         return None
-    return data["action"]
+    return data["decision"]
 
 
 def _post(text, model, base_url, timeout):

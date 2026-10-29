@@ -1,6 +1,6 @@
 {
   "feature_set": "momentum_volatility_volume",
   "feature_parameters": {"ma_window": 20, "vol_window": 20, "volume_window": 20},
-  "model": "qwen3:4b-instruct",
-  "prompt": "Decide the next action for one unnamed series. Its name and the date are unknown.\n\nMomentum, volatility, and volume: one-bar return {r1}; five-bar return {r5}; twenty-bar return {r20}; distance of the last price from its moving average {dist_ma}; how widely recent one-bar returns move {vol}; how the last volume compares with its recent average {vol_ratio}.\n\nPosition: {position}\n\nin means the series is held. out means it is flat. BUY enters from flat. SELL exits from held. HOLD leaves the position as it is.\n\nReply with only this JSON object: {\"action\": \"BUY\"|\"SELL\"|\"HOLD\", \"reason\": \"...\"}\n"
+  "model": "qwen3:1.7b",
+  "prompt": "Decide the next action for one unnamed series. Its name and the date are unknown.\n\nMomentum, volatility, and volume: one-bar return {r1}; five-bar return {r5}; twenty-bar return {r20}; distance of the last price from its moving average {dist_ma}; how widely recent one-bar returns move {vol}; how the last volume compares with its recent average {vol_ratio}.\n\nPosition: {position}\n\nin means the series is held. out means it is flat. BUY enters from flat. SELL exits from held. HOLD leaves the position as it is.\n\nReply with only this JSON object: {\"analysis\": \"...\", \"decision\": \"BUY\"|\"SELL\"|\"HOLD\"}\n"
 }

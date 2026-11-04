@@ -1,6 +1,60 @@
 # LLM strategy backtest
 
-One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt simulates the result. Daily bars are stored as one year file per symbol. This file is the contract for a run and for adding a feature set or a strategy.
+This runs one local model, or an ordinary rule, on one symbol's daily bars. The position is long or flat. A finished run writes its own folder. Objective 1 is one study that uses this engine. Its write-up is published separately and is not in this repository.
+
+Copy `params/default.json` to start a new experiment. Commands below are `python -m src.cli`. On Windows, after the virtualenv step, that interpreter is `.\.venv\Scripts\python.exe`. Later examples use that path. The same commands work as `python -m ...` once the virtualenv is active.
+
+## Scope
+
+- One symbol per run. The bars are daily, or those daily bars resampled to a week or a month. The symbol is whatever Yahoo serves as a daily series, a stock or a fund.
+- The book is long or flat and fully invested. The order fills at the next session's open. Slippage defaults to 0.05% of price. The transaction cost defaults to 0.10% of order value. Cash starts at 100,000.
+- `decide` receives that day's feature row and whether the position is `in` or `out`. The symbol, the date, and the raw price stay out of the prompt. Showing the model the ticker means changing the run loop and this contract.
+- Shorts, position sizing, and a series that is not in the bar file sit outside this runner. The `llm` strategy sends one filled prompt per day. A strategy that needs its own recent rows can store them on itself. News needs a new input to the runner.
+- The model call is Ollama on this machine. Temperature is 0 and thinking is off. The model name is a field in the parameters file. Another host means a change to `src/llm.py`.
+
+## Setup
+
+Tested with Python 3.12.
+
+Install [Ollama](https://ollama.com), then pull the example model:
+
+```text
+ollama pull qwen3:1.7b
+```
+
+Ollama has to be running before an `llm` backtest. If it is down, the run exits. A rule strategy does not call it.
+
+```text
+python -m venv .venv
+```
+
+Windows:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m src.cli download SPY --start 2024-01-01 --end 2024-12-31
+.\.venv\Scripts\python.exe -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --parameters params/default.json
+```
+
+macOS and Linux:
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m src.cli download SPY --start 2024-01-01 --end 2024-12-31
+.venv/bin/python -m src.cli backtest --symbol SPY --start 2024-01-01 --end 2024-12-31 --parameters params/default.json
+```
+
+The backtest prints a folder under `runs/`. Open `summary.txt` and `equity.png` there. Bars land in `data/bars/` and are not committed. The run folder is not committed either.
+
+## Studies
+
+Objective 1 asked `qwen3:1.7b` to trade from the `classic_indicators` set. Those prompts and the rule parameters are in `params/objective1/`. `scripts/objective1.py` repeats that study: one parameter file, on the symbols and periods named in the script.
+
+A new experiment copies `params/default.json`, which uses `momentum_volatility_volume`, and runs `python -m src.cli backtest`.
+
+`comparisons/`, `data/`, and `docs/` are gitignored. The comparison tables, the bar files, and the research notes stay on the machine that ran them.
+
+The sections below are the contract for a run and for adding a feature set or a strategy.
 
 ## Invariants
 
@@ -10,13 +64,6 @@ One local LLM decides `BUY`, `SELL`, or `HOLD` on a single stock, and vectorbt s
 - The symbol and the calendar date are not inputs, so they cannot reach the model.
 - A strategy returns `BUY`, `SELL`, or `HOLD`. It does not download, resample, call vectorbt, or assign `execute_on`. The run loop owns the position.
 - A new feature set or strategy is a new module under the existing base class. A change to what `FeatureSet` or `Strategy` guarantees changes that base class and this file.
-
-## Setup
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
 
 ## Data store
 
@@ -61,7 +108,7 @@ features = build_features(
 
 `classic_indicators` returns `r1`, `r5`, `r20`, `ma50_gap`, `ma200_gap`, `high52_gap`, `rsi14`, `vol20`, `volume_ratio`, `open_gap`, `day_range`, and `close_location`. Its windows are keyword parameters with textbook defaults: `r1_window` 1, `r5_window` 5, `r20_window` 20, `ma50_window` 50, `ma200_window` 200, `high52_window` 252, `rsi14_window` 14, `vol20_window` 20, and `volume_window` 20. `open_gap`, `day_range`, and `close_location` have no window. The printed definition of each windowed column names that parameter. Objective 1's parameter files leave these windows at the defaults. Any other run may pass different windows.
 
-`void` returns the bar timestamps and no columns. A strategy that does not name a set gets it. `momentum_volatility_volume` is the set the model decides from. The row at time t uses only bars timestamped at or before t.
+`void` returns the bar timestamps and no columns. A strategy that does not name a set gets it. `momentum_volatility_volume` is the set in `params/default.json`. Objective 1 uses `classic_indicators`. The row at time t uses only bars timestamped at or before t.
 
 ## Parameters and prompts
 
@@ -113,7 +160,7 @@ A strategy is a `Strategy` subclass in `src/strategies/{name}.py`, built from on
 
 ## Model
 
-`decide` sends that text to Ollama: model `qwen3:1.7b` at `http://127.0.0.1:11434`, temperature 0, thinking off. The reply has to be a JSON object with a string `analysis` and a `decision` of `BUY`, `SELL`, or `HOLD`. Ollama writes the keys in alphabetical order, whatever order the schema or the prompt gives, so the model writes its `analysis` before it picks the `decision`. A renamed key must keep the reasoning key sorting first. A prompt's reply line lists them in that order. Anything else is sent once more, then becomes `HOLD`. If Ollama is down, the call exits.
+`decide` sends that text to Ollama: model `qwen3:1.7b` at `http://127.0.0.1:11434`, temperature 0, thinking off. A later pull of that model name can change the weights, so a rerun can differ. The run does not record the model digest. The reply has to be a JSON object with a string `analysis` and a `decision` of `BUY`, `SELL`, or `HOLD`. Ollama writes the keys in alphabetical order, whatever order the schema or the prompt gives, so the model writes its `analysis` before it picks the `decision`. A renamed key must keep the reasoning key sorting first. A prompt's reply line lists them in that order. Anything else is sent once more, then becomes `HOLD`. If Ollama is down, the call exits.
 
 ```python
 from src.llm import decide
@@ -159,6 +206,8 @@ A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex chara
 `download` takes one or more symbols. `features` takes one feature set name and prints its columns with their definitions. `backtest` takes one `--symbol`, `--start`, `--end`, `--freq` (default `1D`), `--strategy` (default `llm`), `--warmup` (a pandas offset such as `400D` or `13MS`, default `400D`), `--slippage` (default `0.0005`), and `--transaction-cost` (a fraction of order value, default `0.001`). Because the default `llm` strategy requires a `prompt`, a bare `llm` run without parameters fails; pass `--parameters params/default.json` (or `--param prompt=...`). The parameters dict starts from `--parameters PATH`, a JSON object, or `{}`. Each repeated `--param key=value` replaces that key: a value that parses as JSON is that value, so `20` is an integer and an object stays an object, and anything else is a string. It prints the run folder when the backtest finishes. It does not download bars.
 
 ## Objective 1 runner
+
+This section repeats the Objective 1 study. A new experiment uses the setup above and `params/default.json`.
 
 `scripts/objective1.py` runs one parameter file on SPY, QQQ, TLT, and GLD for one named period and writes `comparisons/objective1/{period}.csv` and `.md`. It is not a `src.cli` subcommand. The periods are fixed: `validation` is 2023-01-01 to 2024-12-31, `test` is 2025-01-01 to 2026-09-30, and `stress` is 2019-01-01 to 2022-12-31. Download the bars first. The `llm` strategy calls Ollama, so that process has to be up. The other strategies do not.
 

@@ -158,6 +158,21 @@ A finished backtest writes only under `runs/YYYYMMDD-HHMMSS-` plus six hex chara
 
 `download` takes one or more symbols. `features` takes one feature set name and prints its columns with their definitions. `backtest` takes one `--symbol`, `--start`, `--end`, `--freq` (default `1D`), `--strategy` (default `llm`), `--warmup` (a pandas offset such as `400D` or `13MS`, default `400D`), `--slippage` (default `0.0005`), and `--transaction-cost` (a fraction of order value, default `0.001`). Because the default `llm` strategy requires a `prompt`, a bare `llm` run without parameters fails; pass `--parameters params/default.json` (or `--param prompt=...`). The parameters dict starts from `--parameters PATH`, a JSON object, or `{}`. Each repeated `--param key=value` replaces that key: a value that parses as JSON is that value, so `20` is an integer and an object stays an object, and anything else is a string. It prints the run folder when the backtest finishes. It does not download bars.
 
+## Objective 1 runner
+
+`scripts/objective1.py` runs one parameter file on SPY, QQQ, TLT, and GLD for one named period and writes `comparisons/objective1/{period}.csv` and `.md`. It is not a `src.cli` subcommand. The periods are fixed: `validation` is 2023-01-01 to 2024-12-31, `test` is 2025-01-01 to 2026-09-30, and `stress` is 2019-01-01 to 2022-12-31. Download the bars first. The `llm` strategy calls Ollama, so that process has to be up. The other strategies do not.
+
+```powershell
+.\.venv\Scripts\python.exe -m src.cli download SPY QQQ TLT GLD --start 2018-01-01 --end 2026-09-30
+.\.venv\Scripts\python.exe -m scripts.objective1 --period validation --strategy buy_and_hold --parameters params/objective1/buy_and_hold.json
+.\.venv\Scripts\python.exe -m scripts.objective1 --period validation --strategy trend_ma200 --parameters params/objective1/trend_ma200.json
+.\.venv\Scripts\python.exe -m scripts.objective1 --period validation --strategy rsi_reversion --parameters params/objective1/rsi_reversion.json
+.\.venv\Scripts\python.exe -m scripts.objective1 --period validation --strategy llm --parameters params/objective1/llm_v0.json
+.\.venv\Scripts\python.exe -m scripts.objective1 --period validation --diagnostics
+```
+
+Finish one command before starting the next. They share the comparison file. A later run with the same strategy name replaces that strategy's rows. `llm_v0.json`, `llm_v1.json`, `llm_v2.json`, and `llm_v3.json` are all strategy `llm`, so a later prompt file replaces the `llm` rows. `--diagnostics` reads the table and the `llm` run folders already written. It does not call the model. It adds the matched random seeds, agreement with the two rules, decision counts, and a depth-2 tree. `params/objective1/random.json` is not a run. `comparisons/` and `runs/` stay on this machine. Research notes under `docs/` are local too.
+
 ## Tests
 
 ```powershell
@@ -171,12 +186,13 @@ src/            source
 src/features/   one feature computation per set; void is timestamps only
 src/strategies/ one strategy class per module; the run takes any of them
 tests/          tests
-scripts/objective1.py       Objective 1 comparison table
+scripts/objective1.py       one period, four symbols, one comparison table
 scripts/test_objective1.py  tests for that script
-params/         example strategy parameter files (tracked)
+params/         strategy parameter files (tracked)
 data/bars/      daily year files (local only)
 runs/{id}/      one folder per finished backtest (local only)
 comparisons/objective1/     Objective 1 comparison tables (local only)
+docs/           research notes (local only)
 ```
 
 ## Adding a feature set
